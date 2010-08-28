@@ -8,8 +8,6 @@
 #
 # To deal with transactions, refer to +transaction+, +commit+, and +rollback+.
 class RDBI::Database
-  extend MethLab
-
   # the driver class that is responsible for creating this database handle.
   attr_accessor :driver
 
@@ -26,17 +24,17 @@ class RDBI::Database
   # :attr_reader: last_statement
   #
   # the last statement handle allocated. affected by +prepare+ and +execute+.
-  attr_threaded_accessor :last_statement
+  attr_accessor :last_statement
 
   ##
   # :attr: last_query
   # the last query sent, as a string.
-  attr_threaded_accessor :last_query
+  attr_accessor :last_query
 
   ##
   # :attr: open_statements
   # all the open statement handles.
-  attr_threaded_accessor :open_statements
+  attr_accessor :open_statements
 
   ##
   # :attr: in_transaction
@@ -45,7 +43,11 @@ class RDBI::Database
   ##
   # :attr: in_transaction?
   # are we currently in a transaction?
-  inline(:in_transaction, :in_transaction?) { @in_transaction > 0 }
+  def in_transaction
+    @in_transaction > 0
+  end
+
+  alias in_transaction? in_transaction
 
   # the mutex for this database handle.
   attr_reader :mutex
@@ -57,32 +59,43 @@ class RDBI::Database
   ##
   # :attr_accessor: connected?
   # are we connected to the database?
-  inline(:connected, :connected?) { @connected }
+
+  attr_accessor :connected
+  alias connected? connected
 
   ##
   # :method: ping
   # ping the database. yield an integer result on success.
-  inline(:ping) { raise NoMethodError, "this method is not implemented in this driver" }
+  def ping
+    raise NoMethodError, "this method is not implemented in this driver"
+  end
 
   ##
   # :method: table_schema
   # query the schema for a specific table. Returns an RDBI::Schema object.
-  inline(:table_schema) { |*args| raise NoMethodError, "this method is not implemented in this driver" }
+  def table_schema
+    raise NoMethodError, "this method is not implemented in this driver"
+  end
+
 
   ##
   # :method: schema
   # query the schema for the entire database. Returns an array of RDBI::Schema objects.
-  inline(:schema) { |*args| raise NoMethodError, "this method is not implemented in this driver" }
+  def schema
+    raise NoMethodError, "this method is not implemented in this driver"
+  end
 
   ##
   # :method: rollback
   # ends the outstanding transaction and rolls the affected rows back.
-  inline(:rollback) { @in_transaction -= 1 unless @in_transaction == 0 }
+  def rollback
+    @in_transaction -= 1 unless @in_transaction == 0
+  end
 
   ##
   # :method: commit
   # ends the outstanding transaction and commits the result.
-  inline(:commit)   { @in_transaction -= 1 unless @in_transaction == 0 }
+  alias commit rollback
 
   #
   # Create a new database handle. This is typically done by a driver and

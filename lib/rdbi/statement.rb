@@ -83,7 +83,6 @@
 # may be possible.
 #
 class RDBI::Statement
-  extend MethLab
 
   # the RDBI::Database handle that created this statement.
   attr_reader :dbh
@@ -98,7 +97,7 @@ class RDBI::Statement
   # :attr_reader: last_result
   #
   # The last RDBI::Result this statement yielded.
-  attr_threaded_accessor :last_result
+  attr_accessor :last_result
 
   ##
   # :attr_reader: rewindable_result
@@ -112,7 +111,7 @@ class RDBI::Statement
   # Cascades from RDBI::Database#rewindable_result and through
   # RDBI::Result#rewindable_result.
   #
-  attr_threaded_accessor :rewindable_result
+  attr_accessor :rewindable_result
 
   ##
   # :attr_reader: finished
@@ -123,13 +122,16 @@ class RDBI::Statement
   # :attr_reader: finished?
   #
   # Has this statement been finished?
-  inline(:finished, :finished?)   { @finished  }
+  attr_reader :finished
+  alias finished? finished
 
   ##
   # :attr_reader: driver
   #
   # The RDBI::Driver object that this statement belongs to.
-  inline(:driver)                 { dbh.driver }
+  def driver
+    dbh.driver
+  end
 
   #
   # Initialize a statement handle, given a text query and the RDBI::Database
@@ -209,7 +211,7 @@ class RDBI::Statement
   # to this call) to RDBI::Result.new.
   #
 
-  inline(:new_execution) do |*args|
+  def new_execution
     raise NoMethodError, "this method is not implemented in this driver"
   end
 end

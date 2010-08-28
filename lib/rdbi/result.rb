@@ -62,8 +62,13 @@ class RDBI::Result
   # See RDBI::Statement#rewindable_result.
   attr_reader :rewindable_result
 
-  # FIXME async
-  inline(:complete, :complete?) { true }
+  ## FIXME async
+  #inline(:complete, :complete?) { true }
+  def complete
+    true
+  end
+
+  alias complete? complete
 
   ##
   # :attr_reader: has_data
@@ -74,7 +79,11 @@ class RDBI::Result
   # :attr_reader: has_data?
   #
   # Does this result have data?
-  inline(:has_data, :has_data?) { @data.size > 0 }
+  def has_data
+    @data.size > 0
+  end
+
+  alias has_data? has_data
 
   #
   # Creates a new RDBI::Result. Please refer to RDBI::Statement#new_execution
