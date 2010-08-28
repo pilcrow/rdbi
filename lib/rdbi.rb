@@ -4,8 +4,6 @@ require 'thread'
 
 module RDBI
   class << self
-    extend MethLab
-
     # Every database handle allocated throughout the lifetime of the
     # program. This functionality is subject to change and may be pruned
     # during disconnection.
@@ -14,7 +12,7 @@ module RDBI
     #
     # The last database handle allocated. This may come from pooled connections or regular ones.
     #
-    attr_threaded_accessor :last_dbh
+    attr_accessor :last_dbh
   end
 
   #
