@@ -76,8 +76,7 @@ class TestResult < Test::Unit::TestCase
       as
       fetch
       read
-      raw_fetch
-      finish 
+      finish
     ].collect(&:to_sym).each do |sym|
       assert_respond_to(res, sym)
     end

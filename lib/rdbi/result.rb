@@ -90,7 +90,7 @@ class RDBI::Result
     @binds          = binds
     @type_hash      = type_hash
     @driver         = RDBI::Result::Driver::Array
-    @fetch_handle   = nil
+    @output_driver  = nil
 
     configure_rewindable
     configure_driver(@driver)
@@ -119,7 +119,8 @@ class RDBI::Result
   # by the current +driver+.
   #
   def each
-    while row = @fetch_handle.fetch(1)[0] and !row.empty?
+    while row = fetch(1)[0]
+      #break if row.empty?
       yield(row)
     end
   end
@@ -232,7 +233,26 @@ class RDBI::Result
       as(driver_klass, *args)
     end
 
-    @fetch_handle.fetch(row_count)
+    # :first, :last handling
+    # The return of :first is not the same as fetch(1) at @index 0
+
+    raw_results = case row_count
+                  when Integer
+                    @data.fetch(row_count)
+                  when :all
+                    @data.all
+                  when :rest
+                    @data.rest
+                  when :first, :last
+                    # Blech
+                    return fetch_single_row(row_count)
+                  else
+                    raise ArgumentError, "Unrecognized row_count FIXME"
+                  end
+
+    # grr SQLite3 bug in Cursor#fetch
+    raw_results.compact! if raw_results.length == 1 and raw_results[0].nil?
+    @output_driver.convert_many_rows(raw_results)
   end
 
   #
@@ -255,28 +275,6 @@ class RDBI::Result
   alias read fetch
 
   #
-  # raw_fetch is a straight array fetch without driver interaction. If you
-  # think you need this, please still read the fetch documentation as there is
-  # a considerable amount of overlap.
-  #
-  # This is generally used by Result Drivers to transform results.
-  #
-  def raw_fetch(row_count)
-    final_res = case row_count
-                when :all
-                  @data.all
-                when :rest
-                  @data.rest
-                when :first
-                  [@data.first]
-                when :last
-                  [@data.last]
-                else
-                  @data.fetch(row_count)
-                end
-  end
-
-  #
   # This call finishes the result and the RDBI::Statement handle, scheduling
   # any unpreserved data for garbage collection.
   #
@@ -292,8 +290,21 @@ class RDBI::Result
 
   protected
 
+  # Fetch, convert and return a single row
+  # used by #each, #fetch(:first) and #fetch(:last)
+  def fetch_single_row(how = nil)
+    row = case how
+          when nil
+            @data.fetch(1)
+          else
+            @data.__send__(how) # :first, :last, NoMethodError :)
+          end
+    return unless row
+    @output_driver.convert_one_row(row)
+  end
+
   def configure_driver(driver_klass, *args)
-    @fetch_handle = driver_klass.new(self, *args)
+    @output_driver = driver_klass.new(self, *args)
   end
 
   def configure_rewindable
@@ -322,7 +333,7 @@ end
 # typically passes that to RDBI::Result#raw_fetch to get results to process. It
 # then returns the data transformed.
 #
-# RDBI::Result::Driver additionally provides two methods, convert_row and
+# RDBI::Result::Driver additionally provides two methods, convert_many_rows and
 # convert_item, which leverage RDBI's type conversion facility (see RDBI::Type)
 # to assist in type conversion. For performance reasons, RDBI chooses to
 # convert on request instead of preemptively, so <b>it is the driver implementor's
@@ -342,36 +353,20 @@ class RDBI::Result::Driver
     @result = result
   end
 
-  #
-  # Fetch the result with any transformations. The default is to present the
-  # type converted array.
-  #
-  def fetch(row_count)
-    rows = RDBI::Util.format_results(row_count, (@result.raw_fetch(row_count) || []))
-
-    if rows.nil?
-      return rows 
-    elsif [:first, :last].include?(row_count)
-      return convert_row(rows)
-    else
-      result = []
-      rows.each do |row| 
-        result << convert_row(row)
+  def convert_many_rows(rows)
+    rows.collect! do |row|
+      row.each_with_index do |val, i|
+        row[i] = RDBI::Type::Out.convert(val,
+                                         @result.schema.columns[i],
+                                         @result.type_hash)
       end
     end
-    return result
+
+    return rows
   end
 
-  protected
-
-  def convert_row(row)
-    return [] if row.nil?
-    
-    row.each_with_index do |x, i|
-      row[i] = RDBI::Type::Out.convert(x, @result.schema.columns[i], @result.type_hash)
-    end
-
-    return row
+  def convert_one_row(row)
+    return convert_many_rows([row])[0]
   end
 end
 
@@ -407,12 +402,16 @@ class RDBI::Result::Driver::CSV < RDBI::Result::Driver
     # FIXME columns from schema deal maybe?
   end
 
-  def fetch(row_count)
+  def convert_many_rows(rows)
     csv_string = ""
-    @result.raw_fetch(row_count).each do |row|
+    rows.each do |row|
       csv_string << row.to_csv
     end
-    return csv_string
+    csv_string
+  end
+
+  def convert_one_row(row)
+    row.to_csv
   end
 end
 
@@ -433,24 +432,19 @@ class RDBI::Result::Driver::Struct < RDBI::Result::Driver
     super
   end
 
-  def fetch(row_count)
-    column_names = @result.schema.columns.map(&:name)
-
-    klass = ::Struct.new(*column_names)
-
-    structs = super
-
-    if [:first, :last].include?(row_count) 
-      if structs
-        return klass.new(*structs)
-      else
-        return structs
-      end
+  def convert_many_rows(rows)
+    super.collect! do |row|
+      struct_klass.new(*row)
     end
+  end
 
-    structs.collect! { |row| klass.new(*row) }
+  def convert_one_row(row)
+    struct_klass.new(super)
+  end
 
-    return RDBI::Util.format_results(row_count, structs)
+  private
+  def struct_klass
+    @struct_klass ||= ::Struct.new(*@result.schema.columns.map(&:name))
   end
 end
 
@@ -471,12 +465,12 @@ end
 #
 # Will yield:
 #
-#   --- 
+#   ---
 #   - :i: 1
-#     :x: bar 
+#     :x: bar
 #   - :i: 2
 #     :x: foo
-#   - :i: 3 
+#   - :i: 3
 #     :x: quux
 #
 class RDBI::Result::Driver::YAML < RDBI::Result::Driver
@@ -485,16 +479,19 @@ class RDBI::Result::Driver::YAML < RDBI::Result::Driver
     RDBI::Util.optional_require('yaml')
   end
 
-  def fetch(row_count)
+  def convert_many_rows(rows)
     column_names = @result.schema.columns.map(&:name)
 
-    if [:first, :last].include?(row_count)
-      Hash[column_names.zip(@result.raw_fetch(row_count)[0])].to_yaml
-    else
-      @result.raw_fetch(row_count).collect do |row|
-        Hash[column_names.zip(row)]
-      end.to_yaml
+    rows.collect! do |row|
+      ::Hash[column_names.zip(row)]
     end
+
+    rows.to_yaml
+  end
+
+  def convert_one_row(row)
+    column_names = @result.schema.columns.map(&:name)
+    ::Hash[column_names.zip(row)].to_yaml
   end
 end
 
